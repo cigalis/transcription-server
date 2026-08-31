@@ -1,0 +1,15 @@
+# Local model caches and benchmark recordings
+benchmark-audio/
+benchmark-*.txt
+
+# Legacy vLLM experiments and build artifacts
+vllm-*/
+vllm-*.tar.gz
+Dockerfile
+run-vllm.sh
+
+# Rust build output
+asr-proxy/target/
+
+# Editor and OS files
+.DS_Store

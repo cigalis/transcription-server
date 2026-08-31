@@ -1,0 +1,113 @@
+services:
+  qwen3-asr:
+    image: llama-cpp-vulkan-audio:local
+    container_name: qwen3-asr
+    restart: unless-stopped
+    devices:
+      - /dev/dri/renderD129:/dev/dri/renderD129
+    group_add:
+      - "${RENDER_GID:-991}"
+      - "${VIDEO_GID:-44}"
+    volumes:
+      - vllm-hf-cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 5m
+    command:
+      - --hf-repo
+      - ggml-org/Qwen3-ASR-1.7B-GGUF:Q8_0
+      - --alias
+      - qwen3-asr-1.7b
+      - --gpu-layers
+      - all
+      - --flash-attn
+      - on
+      - --temp
+      - "0"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --ctx-size
+      - "8192"
+      - --parallel
+      - "2"
+
+  asr-proxy:
+    build: ./asr-proxy
+    container_name: asr-proxy
+    restart: unless-stopped
+    depends_on:
+      qwen3-asr:
+        condition: service_healthy
+    environment:
+      QWEN_URL: http://qwen3-asr:8000/v1/chat/completions
+      QWEN_MODEL: qwen3-asr-1.7b
+      MAX_AUDIO_BYTES: "268435456"
+    ports:
+      - "8000:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  gemma4:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    container_name: gemma4
+    restart: unless-stopped
+    devices:
+      - /dev/dri/renderD129:/dev/dri/renderD129
+    group_add:
+      - "${RENDER_GID:-991}"
+      - "${VIDEO_GID:-44}"
+    volumes:
+      - vllm-hf-cache:/root/.cache/huggingface
+      - llama-cpp-cache:/root/.cache/llama.cpp
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 5m
+    command:
+      - --hf-repo
+      - unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL
+      - --no-mmproj
+      - --alias
+      - gemma-4-e4b-it-ud-q4_k_xl
+      - --spec-type
+      - draft-mtp
+      - --spec-draft-n-max
+      - "3"
+      - --gpu-layers
+      - all
+      - --flash-attn
+      - on
+      - --temp
+      - "0.1"
+      - --reasoning
+      - off
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --ctx-size
+      - "8192"
+      - --parallel
+      - "2"
+      - --batch-size
+      - "2048"
+      - --ubatch-size
+      - "1024"
+
+volumes:
+  vllm-hf-cache:
+    external: true
+  llama-cpp-cache:

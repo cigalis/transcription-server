@@ -1,0 +1,8 @@
+FROM ghcr.io/ggml-org/llama.cpp:server-vulkan
+
+USER root
+
+# llama.cpp uses ffprobe to identify audio submitted through its OpenAI API.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
