@@ -1,6 +1,6 @@
 # Local model caches and benchmark recordings
 benchmark-audio/
-benchmark-*.txt
+benchmark-*
 
 # Legacy vLLM experiments and build artifacts
 vllm-*/
