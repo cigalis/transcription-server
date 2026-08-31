@@ -1,8 +1,9 @@
 use std::{env, net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::{DefaultBodyLimit, Multipart, State},
-    http::StatusCode,
+    extract::{DefaultBodyLimit, Multipart, Request, State},
+    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -10,6 +11,7 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use subtle::ConstantTimeEq;
 use tower_http::{limit::RequestBodyLimitLayer, trace::TraceLayer};
 use tracing::info;
 
@@ -20,6 +22,7 @@ struct AppState {
     client: reqwest::Client,
     qwen_url: String,
     qwen_model: String,
+    api_key: String,
 }
 
 #[derive(Serialize)]
@@ -71,6 +74,7 @@ struct TranscriptionResponse {
 struct ApiError {
     status: StatusCode,
     message: String,
+    error_type: &'static str,
 }
 
 impl ApiError {
@@ -78,6 +82,7 @@ impl ApiError {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
+            error_type: "invalid_request_error",
         }
     }
 
@@ -85,6 +90,15 @@ impl ApiError {
         Self {
             status: StatusCode::BAD_GATEWAY,
             message: message.into(),
+            error_type: "api_error",
+        }
+    }
+
+    fn unauthorized() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: "Invalid API key".to_owned(),
+            error_type: "authentication_error",
         }
     }
 }
@@ -96,7 +110,7 @@ impl IntoResponse for ApiError {
             Json(json!({
                 "error": {
                     "message": self.message,
-                    "type": "api_error"
+                    "type": self.error_type
                 }
             })),
         )
@@ -180,6 +194,26 @@ async fn transcribe(
     Ok(Json(TranscriptionResponse { text }))
 }
 
+async fn require_auth(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    authorize(request.headers(), &state.api_key)?;
+    Ok(next.run(request).await)
+}
+
+fn authorize(headers: &HeaderMap, api_key: &str) -> Result<(), ApiError> {
+    let expected = format!("Bearer {api_key}");
+    let authorized = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| bool::from(value.as_bytes().ct_eq(expected.as_bytes())))
+        .unwrap_or(false);
+
+    authorized.then_some(()).ok_or_else(ApiError::unauthorized)
+}
+
 fn audio_format(filename: Option<&str>, mime: Option<&str>) -> String {
     let extension = filename
         .and_then(|name| name.rsplit_once('.').map(|(_, extension)| extension))
@@ -212,11 +246,16 @@ async fn main() {
         qwen_url: env::var("QWEN_URL")
             .unwrap_or_else(|_| "http://qwen3-asr:8000/v1/chat/completions".to_owned()),
         qwen_model: env::var("QWEN_MODEL").unwrap_or_else(|_| "qwen3-asr-1.7b".to_owned()),
+        api_key: env::var("LLAMA_API_KEY").expect("LLAMA_API_KEY must be set"),
     });
+
+    let protected_routes = Router::new()
+        .route("/v1/audio/transcriptions", post(transcribe))
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/v1/audio/transcriptions", post(transcribe))
+        .merge(protected_routes)
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(max_audio_bytes))
         .layer(DefaultBodyLimit::max(max_audio_bytes))

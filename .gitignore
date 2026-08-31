@@ -13,3 +13,4 @@ asr-proxy/target/
 
 # Editor and OS files
 .DS_Store
+.env

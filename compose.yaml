@@ -40,6 +40,7 @@ services:
     build: ./asr-proxy
     container_name: asr-proxy
     restart: unless-stopped
+    env_file: .env
     depends_on:
       qwen3-asr:
         condition: service_healthy
@@ -60,6 +61,7 @@ services:
     image: ghcr.io/ggml-org/llama.cpp:server-vulkan
     container_name: gemma4
     restart: unless-stopped
+    env_file: .env
     devices:
       - /dev/dri/renderD129:/dev/dri/renderD129
     group_add:

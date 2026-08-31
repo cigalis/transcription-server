@@ -25,11 +25,23 @@ Create the persistent Hugging Face cache volume once, then build and start the s
 
 ```bash
 docker volume create vllm-hf-cache
+cp .env.example .env
+umask 077
+openssl rand -hex 32 | { IFS= read -r key; printf 'LLAMA_API_KEY=%s\n' "$key"; } > .env
+chmod 600 .env
 docker compose build
 docker compose up -d
 ```
 
 The first start downloads the Qwen and Gemma GGUF models into the persistent cache.
+
+The key is written directly to `.env`; it is never printed or included in the command history. Load it into the current shell before using the examples below:
+
+```bash
+set -a
+. ./.env
+set +a
+```
 
 ## Services
 
@@ -44,6 +56,7 @@ Qwen remains internal to the Compose network. The proxy handles multipart upload
 
 ```bash
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
+  -H "Authorization: Bearer $LLAMA_API_KEY" \
   -F "file=@recording.wav" \
   -F "model=qwen3-asr-1.7b"
 ```
@@ -60,6 +73,7 @@ Audio uploads are limited to 256 MiB by default. Change `MAX_AUDIO_BYTES` in `co
 
 ```bash
 curl http://localhost:8001/v1/chat/completions \
+  -H "Authorization: Bearer $LLAMA_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "gemma-4-e4b-it-ud-q4_k_xl",
@@ -69,4 +83,4 @@ curl http://localhost:8001/v1/chat/completions \
 
 ## Security
 
-The services intentionally have no authentication and bind to all interfaces. Restrict ports `8000` and `8001` to trusted LAN clients with a firewall or reverse proxy before exposing this deployment beyond a trusted network.
+Both public APIs require `Authorization: Bearer $LLAMA_API_KEY`. The local `.env` file is ignored by Git, has permissions `0600`, and must never be committed. Restrict ports `8000` and `8001` to trusted LAN clients with a firewall or reverse proxy before exposing this deployment beyond a trusted network.
