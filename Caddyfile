@@ -1,0 +1,18 @@
+emplacement-n1-developpement.pro.dns-orange.fr {
+	encode zstd gzip
+
+	@asr path /v1/audio/transcriptions
+	handle @asr {
+		reverse_proxy asr-proxy:8080
+	}
+
+	@gemma path /gemma/*
+	handle @gemma {
+		uri strip_prefix /gemma
+		reverse_proxy gemma4:8000
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}

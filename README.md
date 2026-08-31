@@ -11,6 +11,7 @@ Docker Compose deployment for an AMD Vulkan transcription and cleanup pipeline:
 - Docker Engine with Docker Compose.
 - An AMD GPU exposed through Vulkan at `/dev/dri/renderD129`.
 - Access to the `render` and `video` groups for the container user.
+- The DNS name `emplacement-n1-developpement.pro.dns-orange.fr` pointing to the public IP of this host.
 
 The defaults target a machine where the render and video group IDs are `991` and `44`. Override them when needed:
 
@@ -45,17 +46,17 @@ set +a
 
 ## Services
 
-| Service | Host port | Model | Purpose |
+| Service | Public URL | Model | Purpose |
 | --- | ---: | --- | --- |
-| `asr-proxy` | 8000 | Qwen3-ASR-1.7B Q8_0 | OpenAI-compatible audio transcription API |
-| `gemma4` | 8001 | Gemma 4 E4B UD-Q4_K_XL | Text cleanup API |
+| `asr-proxy` | `https://emplacement-n1-developpement.pro.dns-orange.fr/v1/audio/transcriptions` | Qwen3-ASR-1.7B Q8_0 | OpenAI-compatible audio transcription API |
+| `gemma4` | `https://emplacement-n1-developpement.pro.dns-orange.fr/gemma/v1` | Gemma 4 E4B UD-Q4_K_XL | Text cleanup API |
 
-Qwen remains internal to the Compose network. The proxy handles multipart uploads, Base64 conversion for llama.cpp, and removes Qwen's native `language ...<asr_text>` prefix.
+Qwen, the ASR proxy, and Gemma remain internal to the Compose network. Caddy is the only service that publishes ports on the host, obtains the TLS certificate, and forwards requests to the APIs.
 
 ## Transcription API
 
 ```bash
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
+curl -X POST https://emplacement-n1-developpement.pro.dns-orange.fr/v1/audio/transcriptions \
   -H "Authorization: Bearer $LLAMA_API_KEY" \
   -F "file=@recording.wav" \
   -F "model=qwen3-asr-1.7b"
@@ -72,7 +73,7 @@ Audio uploads are limited to 256 MiB by default. Change `MAX_AUDIO_BYTES` in `co
 ## Gemma API
 
 ```bash
-curl http://localhost:8001/v1/chat/completions \
+curl https://emplacement-n1-developpement.pro.dns-orange.fr/gemma/v1/chat/completions \
   -H "Authorization: Bearer $LLAMA_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -83,4 +84,12 @@ curl http://localhost:8001/v1/chat/completions \
 
 ## Security
 
-Both public APIs require `Authorization: Bearer $LLAMA_API_KEY`. The local `.env` file is ignored by Git, has permissions `0600`, and must never be committed. Restrict ports `8000` and `8001` to trusted LAN clients with a firewall or reverse proxy before exposing this deployment beyond a trusted network.
+Both public APIs require `Authorization: Bearer $LLAMA_API_KEY`. The local `.env` file is ignored by Git, has permissions `0600`, and must never be committed.
+
+Configure the router with these port forwards to `192.168.1.57` before starting Caddy. Port 80 is required for Let's Encrypt validation and redirects to HTTPS. Port 443 serves the API; its UDP mapping enables HTTP/3 but is optional.
+
+| Protocol | Public port | Destination |
+| --- | ---: | --- |
+| TCP | 80 | `192.168.1.57:80` |
+| TCP | 443 | `192.168.1.57:443` |
+| UDP | 443 | `192.168.1.57:443` (optional) |
