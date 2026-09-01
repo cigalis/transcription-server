@@ -22,6 +22,7 @@ struct AppState {
     client: reqwest::Client,
     qwen_url: String,
     qwen_model: String,
+    gemma_url: String,
     api_key: String,
 }
 
@@ -194,6 +195,88 @@ async fn transcribe(
     Ok(Json(TranscriptionResponse { text }))
 }
 
+async fn chat_completions(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    forward_chat(state.clone(), headers, request, &state.gemma_url).await
+}
+
+async fn forward_chat(
+    state: Arc<AppState>,
+    headers: HeaderMap,
+    request: serde_json::Value,
+    upstream_url: &str,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let is_french = headers
+        .get("x-text-language")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("fr"));
+
+    let mut response = state
+        .client
+        .post(upstream_url)
+        .header(AUTHORIZATION, format!("Bearer {}", state.api_key))
+        .json(&request)
+        .send()
+        .await
+        .map_err(|error| ApiError::upstream(format!("chat request failed: {error}")))?
+        .error_for_status()
+        .map_err(|error| ApiError::upstream(format!("chat upstream returned an error: {error}")))?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| ApiError::upstream(format!("invalid chat response: {error}")))?;
+
+    if is_french {
+        if let Some(choices) = response.get_mut("choices").and_then(|value| value.as_array_mut()) {
+            for choice in choices {
+                if let Some(content) = choice
+                    .pointer_mut("/message/content")
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                {
+                    choice["message"]["content"] = normalize_french_typography(&content).into();
+                }
+            }
+        }
+    }
+
+    Ok(Json(response))
+}
+
+fn normalize_french_typography(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut french_quote = false;
+    let mut double_quote = false;
+
+    for character in text.chars() {
+        match character {
+            '«' => {
+                french_quote = true;
+                normalized.push(character);
+            }
+            '»' => {
+                normalized.push(character);
+                french_quote = false;
+            }
+            '"' => {
+                double_quote = !double_quote;
+                normalized.push(character);
+            }
+            ':' | ';' | '!' | '?' if !french_quote && !double_quote => {
+                while matches!(normalized.chars().last(), Some(' ' | '\u{202f}' | '\u{00a0}')) {
+                    normalized.pop();
+                }
+                normalized.push('\u{00a0}');
+                normalized.push(character);
+            }
+            _ => normalized.push(character),
+        }
+    }
+
+    normalized
+}
+
 async fn require_auth(
     State(state): State<Arc<AppState>>,
     request: Request,
@@ -246,11 +329,14 @@ async fn main() {
         qwen_url: env::var("QWEN_URL")
             .unwrap_or_else(|_| "http://qwen3-asr:8000/v1/chat/completions".to_owned()),
         qwen_model: env::var("QWEN_MODEL").unwrap_or_else(|_| "qwen3-asr-1.7b".to_owned()),
+        gemma_url: env::var("GEMMA_URL")
+            .unwrap_or_else(|_| "http://gemma4:8000/v1/chat/completions".to_owned()),
         api_key: env::var("LLAMA_API_KEY").expect("LLAMA_API_KEY must be set"),
     });
 
     let protected_routes = Router::new()
         .route("/v1/audio/transcriptions", post(transcribe))
+        .route("/v1/chat/completions", post(chat_completions))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     let app = Router::new()

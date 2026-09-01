@@ -6,6 +6,15 @@ emplacement-n1-developpement.pro.dns-orange.fr {
 		reverse_proxy asr-proxy:8080
 	}
 
+	@gemma_french {
+		path /gemma/*
+		header X-Text-Language fr
+	}
+	handle @gemma_french {
+		uri strip_prefix /gemma
+		reverse_proxy asr-proxy:8080
+	}
+
 	@gemma path /gemma/*
 	handle @gemma {
 		uri strip_prefix /gemma

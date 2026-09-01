@@ -47,6 +47,7 @@ services:
     environment:
       QWEN_URL: http://qwen3-asr:8000/v1/chat/completions
       QWEN_MODEL: qwen3-asr-1.7b
+      GEMMA_URL: http://gemma4:8000/v1/chat/completions
       MAX_AUDIO_BYTES: "268435456"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
@@ -89,7 +90,13 @@ services:
       - --flash-attn
       - on
       - --temp
-      - "0.1"
+      - "0"
+      - --top-k
+      - "1"
+      - --top-p
+      - "1"
+      - --min-p
+      - "0"
       - --reasoning
       - off
       - --host
@@ -99,7 +106,7 @@ services:
       - --ctx-size
       - "8192"
       - --parallel
-      - "2"
+      - "1"
       - --batch-size
       - "2048"
       - --ubatch-size

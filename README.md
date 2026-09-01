@@ -75,6 +75,7 @@ Audio uploads are limited to 256 MiB by default. Change `MAX_AUDIO_BYTES` in `co
 ```bash
 curl https://emplacement-n1-developpement.pro.dns-orange.fr/gemma/v1/chat/completions \
   -H "Authorization: Bearer $LLAMA_API_KEY" \
+  -H "X-Text-Language: fr" \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "gemma-4-e4b-it-ud-q4_k_xl",
@@ -84,7 +85,9 @@ curl https://emplacement-n1-developpement.pro.dns-orange.fr/gemma/v1/chat/comple
 
 ## Security
 
-Both public APIs require `Authorization: Bearer $LLAMA_API_KEY`. The local `.env` file is ignored by Git, has permissions `0600`, and must never be committed.
+All public APIs require `Authorization: Bearer $LLAMA_API_KEY`. The local `.env` file is ignored by Git, has permissions `0600`, and must never be committed.
+
+Gemma uses deterministic sampling and a single generation slot by default, favoring reproducible cleanup over concurrent requests. Send `X-Text-Language: fr` for French cleanup: the proxy then applies French nonbreaking spaces before `:`, `;`, `!`, and `?`, without changing text inside quotation marks. Requests without that header are forwarded unchanged.
 
 Configure the router with these port forwards to `192.168.1.57` before starting Caddy. Port 80 is required for Let's Encrypt validation and redirects to HTTPS. Port 443 serves the API; its UDP mapping enables HTTP/3 but is optional.
 
